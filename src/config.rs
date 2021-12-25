@@ -17,16 +17,6 @@ pub struct PathConfig {
     recursive: bool,
 }
 
-macro_rules! path {
-    ($($comp:expr), *) => {
-        {
-            let mut new_path = std::path::PathBuf::new();
-            $(new_path.push(&$comp);)*
-            new_path
-        }
-    };
-}
-
 impl Config {
     pub fn read() -> TuxDriveResult<Self> {
         let home_dir = dirs::home_dir().ok_or(TuxDriveError::HomeDirNotFound)?;
