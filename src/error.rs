@@ -24,6 +24,9 @@ pub enum TuxDriveError {
 
     #[error("Failed to find config file")]
     ConfigFileNotFound,
+
+    #[error("{0} is not an absolute path")]
+    PathNotAbs(String),
 }
 
 pub type TuxDriveResult<T> = Result<T, TuxDriveError>;

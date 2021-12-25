@@ -1,5 +1,6 @@
 use std::{
     fs::File,
+    io,
     path::{Path, PathBuf},
 };
 
@@ -36,14 +37,30 @@ impl Config {
             path![config_dir, ".config", "tuxdirver", "tuxdriver.json"],
             path!["tuxdriver.json"],
         ];
-        for config_path in &config_paths {
-            if config_path.exists() && config_path.is_file() {
-                let file = File::open(&config_path)?;
-                let config: Config = serde_json::from_reader(&file)?;
-                return Ok(config);
-            }
+        if let Some(config_path) = config_paths
+            .into_iter()
+            .find(|path| path.exists() && path.is_file())
+        {
+            let file = File::open(&config_path)?;
+            Config::from_reader(file)
+        } else {
+            Err(TuxDriveError::ConfigFileNotFound)
         }
-        Err(TuxDriveError::ConfigFileNotFound)
+    }
+
+    fn from_reader<R: io::Read>(rdr: R) -> TuxDriveResult<Self> {
+        let config: Config = serde_json::from_reader(rdr)?;
+        if let Some(path_cfg) = config
+            .0
+            .iter()
+            .find(|path_cfg| !path_cfg.path.is_absolute())
+        {
+            Err(TuxDriveError::PathNotAbs(
+                path_cfg.path.display().to_string(),
+            ))
+        } else {
+            Ok(config)
+        }
     }
 
     pub fn paths(&self) -> &[PathConfig] {
@@ -63,6 +80,8 @@ impl PathConfig {
 
 #[cfg(test)]
 mod test {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -79,7 +98,7 @@ mod test {
     }
 ]
 "#;
-        let config: Config = serde_json::from_str(config_text).unwrap();
+        let config = Config::from_reader(Cursor::new(config_text)).unwrap();
         let expected_config = Config(vec![
             PathConfig {
                 path: PathBuf::from("/home/foo/rec_dir"),
@@ -106,7 +125,7 @@ mod test {
     }
 ]
 "#;
-        let config: Result<Config, _> = serde_json::from_str(config_text);
+        let config = Config::from_reader(Cursor::new(config_text));
         assert!(config.is_err());
     }
 
@@ -123,7 +142,22 @@ mod test {
     }
 ]
 "#;
-        let config: Result<Config, _> = serde_json::from_str(config_text);
+        let config = Config::from_reader(Cursor::new(config_text));
         assert!(config.is_err());
+    }
+
+    #[test]
+    pub fn test_not_abs_path() {
+        let config_text = r#"
+[
+    {
+        "path": "foo/rec_dir",
+        "recursive": true
+    }
+]
+"#;
+        let config = Config::from_reader(Cursor::new(config_text));
+        assert!(config.is_err());
+        assert!(matches!(config, Err(TuxDriveError::PathNotAbs(_))));
     }
 }
