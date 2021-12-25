@@ -1,4 +1,7 @@
-use std::{fs::File, path::PathBuf};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
 
@@ -8,7 +11,7 @@ use crate::error::{TuxDriveError, TuxDriveResult};
 pub struct Config(Vec<PathConfig>);
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-struct PathConfig {
+pub struct PathConfig {
     path: PathBuf,
     recursive: bool,
 }
@@ -41,6 +44,20 @@ impl Config {
             }
         }
         Err(TuxDriveError::ConfigFileNotFound)
+    }
+
+    pub fn paths(&self) -> &[PathConfig] {
+        &self.0
+    }
+}
+
+impl PathConfig {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn recursive(&self) -> bool {
+        self.recursive
     }
 }
 
