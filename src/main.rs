@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use config::Config;
@@ -37,11 +36,11 @@ fn main() {
 
 fn setup_and_run() -> TuxDriveResult<()> {
     let config = Config::read()?;
-    let mut watcher = Watcher::new()?;
-    let mut path_forest = PathForest::new();
+    let mut watcher = Watcher::new();
+    let mut path_forest = PathForest::<BasicNodeInfo>::new();
     for path_conf in config.paths() {
         watcher.add_directory(path_conf.path().canonicalize()?, path_conf.recursive())?;
-        add_dir_recursively(path_conf.path(), &mut path_forest)?;
+        path_forest.add_dir_recursively(path_conf.path())?;
     }
 
     // So now we have our path_forest ready with all the paths, and our watcher has the files added
@@ -49,29 +48,4 @@ fn setup_and_run() -> TuxDriveResult<()> {
     let path_forest = Arc::new(RwLock::new(path_forest));
 
     Ok(())
-}
-
-fn add_dir_recursively(
-    dir_path: &Path,
-    forest: &mut PathForest<BasicNodeInfo>,
-) -> TuxDriveResult<()> {
-    fn add_dir_intern(
-        root_path: &Path,
-        dir_path: &Path,
-        forest: &mut PathForest<BasicNodeInfo>,
-    ) -> TuxDriveResult<()> {
-        for entry in dir_path.read_dir()? {
-            let entry = entry?;
-            let is_dir = entry.file_type()?.is_dir();
-            let path = entry.path();
-            let info = BasicNodeInfo::default();
-            forest.add_path(root_path, &path, info, is_dir);
-            if is_dir {
-                add_dir_intern(root_path, &path, forest)?;
-            }
-        }
-        Ok(())
-    }
-
-    add_dir_intern(dir_path, dir_path, forest)
 }

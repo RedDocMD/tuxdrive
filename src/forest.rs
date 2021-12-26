@@ -4,6 +4,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use crate::error::TuxDriveResult;
+
 pub mod info;
 
 #[derive(Debug)]
@@ -34,11 +36,12 @@ impl<T> PathForest<T> {
     }
 }
 
-impl<T> PathForest<T> {
-    pub fn add_path<P: AsRef<Path>>(&mut self, root_path: &Path, path: P, info: T, is_dir: bool)
-    where
-        T: Default,
-    {
+impl<T> PathForest<T>
+where
+    T: Default,
+{
+    pub fn add_path<P: AsRef<Path>>(&mut self, root_path: P, path: P, info: T, is_dir: bool) {
+        let root_path = root_path.as_ref();
         if let Some(tree) = self.trees.get_mut(root_path) {
             tree.add_path(path, info, is_dir);
         } else {
@@ -46,6 +49,25 @@ impl<T> PathForest<T> {
             new_tree.add_path(path, info, is_dir);
             self.trees.insert(PathBuf::from(root_path), new_tree);
         }
+    }
+
+    pub fn add_dir_recursively<P: AsRef<Path>>(&mut self, dir_path: P) -> TuxDriveResult<()> {
+        let dir_path = dir_path.as_ref();
+        self.add_dir_intern(dir_path, dir_path)
+    }
+
+    fn add_dir_intern(&mut self, root_path: &Path, dir_path: &Path) -> TuxDriveResult<()> {
+        for entry in dir_path.read_dir()? {
+            let entry = entry?;
+            let is_dir = entry.file_type()?.is_dir();
+            let path = entry.path();
+            let info = T::default();
+            self.add_path(root_path, &path, info, is_dir);
+            if is_dir {
+                self.add_dir_intern(root_path, &path)?;
+            }
+        }
+        Ok(())
     }
 }
 
