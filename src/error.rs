@@ -4,9 +4,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum TuxDriveError {
-    #[error("Notify error: {0}")]
-    Notify(#[from] notify::Error),
-
     #[error("{0} is not a directory")]
     NotDirectory(String),
 
@@ -27,6 +24,9 @@ pub enum TuxDriveError {
 
     #[error("{0} is not an absolute path")]
     PathNotAbs(String),
+
+    #[error("Platform error: {0}")]
+    NixError(#[from] nix::errno::Errno),
 }
 
 pub type TuxDriveResult<T> = Result<T, TuxDriveError>;

@@ -3,11 +3,9 @@ use std::sync::{Arc, RwLock};
 
 use config::Config;
 use error::TuxDriveResult;
-use forest::{info::NodeInfo, PathForest};
+use forest::{info::BasicNodeInfo, PathForest};
 
 use crate::watcher::Watcher;
-
-use self::forest::info::BasicNodeInfo;
 
 #[macro_export]
 macro_rules! path {
@@ -66,8 +64,8 @@ fn add_dir_recursively(
             let entry = entry?;
             let is_dir = entry.file_type()?.is_dir();
             let path = entry.path();
-            let info = BasicNodeInfo::default().with_is_dir(is_dir);
-            forest.add_path(root_path, &path, info);
+            let info = BasicNodeInfo::default();
+            forest.add_path(root_path, &path, info, is_dir);
             if is_dir {
                 add_dir_intern(root_path, &path, forest)?;
             }
