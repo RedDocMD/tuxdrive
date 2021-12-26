@@ -4,45 +4,42 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use info::NodeInfo;
+
+pub mod info;
+
 #[derive(Debug)]
-struct PathTree {
+struct PathTree<T> {
     parent_path: Option<PathBuf>,
-    node: PathNode,
+    node: PathNode<T>,
 }
 
 #[derive(Debug)]
-struct PathNode {
+struct PathNode<T> {
     name: Option<OsString>,
-    children: HashMap<OsString, PathNode>,
-    info: NodeInfo,
+    children: HashMap<OsString, PathNode<T>>,
+    info: T,
 }
 
 #[derive(Debug)]
-pub struct PathForest {
+pub struct PathForest<T> {
     /// Map from root path to corresponding tree
-    trees: HashMap<PathBuf, PathTree>,
+    trees: HashMap<PathBuf, PathTree<T>>,
 }
 
-#[derive(Debug, Default)]
-pub struct NodeInfo {
-    is_dir: bool,
-}
-
-impl NodeInfo {
-    pub fn with_is_dir(mut self, is_dir: bool) -> Self {
-        self.is_dir = is_dir;
-        self
-    }
-}
-
-impl PathForest {
+impl<T> PathForest<T> {
     pub fn new() -> Self {
         Self {
             trees: HashMap::new(),
         }
     }
+}
 
-    pub fn add_path<P: AsRef<Path>>(&mut self, root_path: &Path, path: P, info: NodeInfo) {
+impl<T> PathForest<T>
+where
+    T: NodeInfo,
+{
+    pub fn add_path<P: AsRef<Path>>(&mut self, root_path: &Path, path: P, info: T) {
         if let Some(tree) = self.trees.get_mut(root_path) {
             tree.add_path(path, info);
         } else {
@@ -53,18 +50,37 @@ impl PathForest {
     }
 }
 
-impl PathTree {
+impl<T> PathTree<T>
+where
+    T: NodeInfo,
+{
     /// Precondition: `root_path` must be cannonical
     fn new<P: AsRef<Path>>(root_path: P) -> Self {
         let root_path = PathBuf::from(root_path.as_ref());
         assert!(root_path.exists() && root_path.is_dir());
         let parent_path = root_path.parent().map(PathBuf::from);
         let root_name = root_path.file_name().map(OsString::from);
-        let info = NodeInfo::default().with_is_dir(true);
+        let info = T::default().with_is_dir(true);
         let node = PathNode::new(root_name, info);
         Self { parent_path, node }
     }
 
+    /// Precondition:
+    /// - `path` must be cannonical
+    /// - `path` must be compatible with this tree
+    fn add_path<P: AsRef<Path>>(&mut self, path: P, info: T) {
+        assert!(self.is_path_compatible(&path));
+        let root_path_comps_len = self.root_path().components().count();
+        let residual_path_comps: Vec<_> = path
+            .as_ref()
+            .components()
+            .skip(root_path_comps_len)
+            .collect();
+        self.node.add_node_rec(&residual_path_comps, info);
+    }
+}
+
+impl<T> PathTree<T> {
     /// Precondition: `path` must be cannonical
     fn is_path_compatible<P: AsRef<Path>>(&self, path: P) -> bool {
         path.as_ref().starts_with(self.root_path())
@@ -80,24 +96,13 @@ impl PathTree {
             PathBuf::from("/")
         }
     }
-
-    /// Precondition:
-    /// - `path` must be cannonical
-    /// - `path` must be compatible with this tree
-    fn add_path<P: AsRef<Path>>(&mut self, path: P, info: NodeInfo) {
-        assert!(self.is_path_compatible(&path));
-        let root_path_comps_len = self.root_path().components().count();
-        let residual_path_comps: Vec<_> = path
-            .as_ref()
-            .components()
-            .skip(root_path_comps_len)
-            .collect();
-        self.node.add_node_rec(&residual_path_comps, info);
-    }
 }
 
-impl PathNode {
-    fn new(name: Option<OsString>, info: NodeInfo) -> Self {
+impl<T> PathNode<T>
+where
+    T: NodeInfo,
+{
+    fn new(name: Option<OsString>, info: T) -> Self {
         Self {
             name,
             info,
@@ -105,7 +110,7 @@ impl PathNode {
         }
     }
 
-    fn add_node_rec(&mut self, comps: &[Component<'_>], info: NodeInfo) {
+    fn add_node_rec(&mut self, comps: &[Component<'_>], info: T) {
         assert!(!comps.is_empty());
         if comps.len() == 1 {
             let name = comps[0].as_os_str().to_os_string();
@@ -115,8 +120,7 @@ impl PathNode {
             child.add_node_rec(&comps[1..], info);
         } else {
             let name = comps[0].as_os_str().to_os_string();
-            let mut new_node =
-                PathNode::new(Some(name.clone()), NodeInfo::default().with_is_dir(true));
+            let mut new_node = PathNode::new(Some(name.clone()), T::default().with_is_dir(true));
             new_node.add_node_rec(&comps[1..], info);
             self.children.insert(name, new_node);
         }
