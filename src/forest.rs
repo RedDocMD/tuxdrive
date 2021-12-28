@@ -53,10 +53,24 @@ where
 
     pub fn add_dir_recursively<P: AsRef<Path>>(&mut self, dir_path: P) -> TuxDriveResult<()> {
         let dir_path = dir_path.as_ref();
-        self.add_dir_intern(dir_path, dir_path)
+        assert!(dir_path.is_dir());
+        self.add_dir_rec_intern(dir_path, dir_path)
     }
 
-    fn add_dir_intern(&mut self, root_path: &Path, dir_path: &Path) -> TuxDriveResult<()> {
+    pub fn add_dir_non_recursively<P: AsRef<Path>>(&mut self, dir_path: P) -> TuxDriveResult<()> {
+        let dir_path = dir_path.as_ref();
+        assert!(dir_path.is_dir());
+        for entry in dir_path.read_dir()? {
+            let entry = entry?;
+            let is_dir = entry.file_type()?.is_dir();
+            let path = entry.path();
+            let info = T::default();
+            self.add_path(dir_path, &path, info, is_dir);
+        }
+        Ok(())
+    }
+
+    fn add_dir_rec_intern(&mut self, root_path: &Path, dir_path: &Path) -> TuxDriveResult<()> {
         for entry in dir_path.read_dir()? {
             let entry = entry?;
             let is_dir = entry.file_type()?.is_dir();
@@ -64,8 +78,18 @@ where
             let info = T::default();
             self.add_path(root_path, &path, info, is_dir);
             if is_dir {
-                self.add_dir_intern(root_path, &path)?;
+                self.add_dir_rec_intern(root_path, &path)?;
             }
+        }
+        Ok(())
+    }
+
+    pub fn dfs_mut<F>(&mut self, mut func: F) -> TuxDriveResult<()>
+    where
+        F: FnMut(&Path, &mut T, bool) -> TuxDriveResult<bool> + Copy,
+    {
+        for (_, tree) in self.trees.iter_mut() {
+            tree.dfs_mut(func)?;
         }
         Ok(())
     }
@@ -118,6 +142,14 @@ impl<T> PathTree<T> {
             PathBuf::from("/")
         }
     }
+
+    fn dfs_mut<F>(&mut self, mut func: F) -> TuxDriveResult<()>
+    where
+        F: FnMut(&Path, &mut T, bool) -> TuxDriveResult<bool> + Copy,
+    {
+        let mut root_path = self.root_path();
+        self.node.dfs_mut(&mut root_path, func)
+    }
 }
 
 impl<T> PathNode<T> {
@@ -147,5 +179,22 @@ impl<T> PathNode<T> {
             new_node.add_node_rec(&comps[1..], info, is_dir);
             self.children.insert(name, new_node);
         }
+    }
+
+    fn dfs_mut<F>(&mut self, curr_path: &mut PathBuf, mut func: F) -> TuxDriveResult<()>
+    where
+        F: FnMut(&Path, &mut T, bool) -> TuxDriveResult<bool> + Copy,
+    {
+        let carry_on = func(curr_path, &mut self.info, self.is_dir)?;
+        if carry_on {
+            for (_, node) in self.children.iter_mut() {
+                // Name can be empty only at the root
+                assert!(node.name.is_some());
+                curr_path.push(node.name.as_ref().unwrap());
+                node.dfs_mut(curr_path, func)?;
+                curr_path.pop();
+            }
+        }
+        Ok(())
     }
 }
