@@ -1,8 +1,6 @@
-use std::sync::{Arc, RwLock};
-
 use config::Config;
 use error::TuxDriveResult;
-use forest::{info::BasicNodeInfo, PathForest};
+use forest::{info::BasicNodeInfo, DirectoryAddOptions, PathForest};
 
 use crate::watcher::Watcher;
 
@@ -36,16 +34,15 @@ fn main() {
 
 fn setup_and_run() -> TuxDriveResult<()> {
     let config = Config::read()?;
-    let mut watcher = Watcher::new();
+    let (mut watcher, event_recv) = Watcher::new()?;
     let mut path_forest = PathForest::<BasicNodeInfo>::new();
     for path_conf in config.paths() {
         watcher.add_directory(path_conf.path().canonicalize()?, path_conf.recursive())?;
-        path_forest.add_dir_recursively(path_conf.path())?;
+        path_forest.add_dir_recursively(path_conf.path(), DirectoryAddOptions::new())?;
     }
 
     // So now we have our path_forest ready with all the paths, and our watcher has the files added
     // Therefore, path_forest can now go behind a RwLock.
-    let path_forest = Arc::new(RwLock::new(path_forest));
 
     Ok(())
 }

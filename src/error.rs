@@ -27,6 +27,9 @@ pub enum TuxDriveError {
 
     #[error("Platform error: {0}")]
     NixError(#[from] nix::errno::Errno),
+
+    #[error("Thread pool build error: {0}")]
+    ThreadPoolBuildError(#[from] rayon::ThreadPoolBuildError),
 }
 
 pub type TuxDriveResult<T> = Result<T, TuxDriveError>;
