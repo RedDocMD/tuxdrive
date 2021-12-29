@@ -273,7 +273,7 @@ impl<T> PathTree<T> {
     fn strip_root<'a>(&self, path: &'a Path) -> Vec<Component<'a>> {
         assert!(self.is_path_compatible(&path));
         let root_path_comps_len = self.root_path().components().count();
-        path.components().skip(root_path_comps_len).collect()
+        path.components().skip(root_path_comps_len - 1).collect()
     }
 
     pub fn dfs_mut<F>(&mut self, func: F) -> TuxDriveResult<RecursiveBehaviour>

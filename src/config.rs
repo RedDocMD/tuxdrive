@@ -22,10 +22,10 @@ impl Config {
         let home_dir = dirs::home_dir().ok_or(TuxDriveError::HomeDirNotFound)?;
         let config_dir = dirs::config_dir().ok_or(TuxDriveError::ConfigDirNotFound)?;
         let config_paths = vec![
-            path![home_dir, ".tuxdriver.json"],
-            path![config_dir, ".tuxdriver.json"],
-            path![config_dir, ".config", "tuxdirver", "tuxdriver.json"],
-            path!["tuxdriver.json"],
+            path![home_dir, ".tuxdrive.json"],
+            path![config_dir, ".tuxdrive.json"],
+            path![config_dir, ".config", "tuxdirve", "tuxdrive.json"],
+            path!["tuxdrive.json"],
         ];
         if let Some(config_path) = config_paths
             .into_iter()

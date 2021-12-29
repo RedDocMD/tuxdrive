@@ -1,3 +1,5 @@
+use std::thread;
+
 use config::Config;
 use error::TuxDriveResult;
 use forest::{info::BasicNodeInfo, DirectoryAddOptions, PathForest};
@@ -32,13 +34,22 @@ fn main() {
     }
 }
 
+const POLL_INTERVAL_SECS: u64 = 5;
+
 fn setup_and_run() -> TuxDriveResult<()> {
     let config = Config::read()?;
-    let (mut watcher, event_recv) = Watcher::new()?;
+    let (mut watcher, event_recv) = Watcher::<{ POLL_INTERVAL_SECS }>::new()?;
     let mut path_forest = PathForest::<BasicNodeInfo>::new();
     for path_conf in config.paths() {
         watcher.add_directory(path_conf.path().canonicalize()?, path_conf.recursive())?;
         path_forest.add_dir_recursively(path_conf.path(), DirectoryAddOptions::new())?;
+    }
+
+    // Start the watcher
+    thread::spawn(move || watcher.start_polling());
+
+    while let Ok(event) = event_recv.recv() {
+        println!("{:?}", event);
     }
 
     // So now we have our path_forest ready with all the paths, and our watcher has the files added
