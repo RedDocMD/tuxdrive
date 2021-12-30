@@ -89,6 +89,7 @@ impl<const POLL_INTERVAL_SECS: u64> Watcher<{ POLL_INTERVAL_SECS }> {
     /// You probably should run this function on a separate thread.
     pub fn start_polling(&mut self) -> TuxDriveResult<()> {
         loop {
+            log::debug!("Polling ...");
             self.poll()?;
             thread::sleep(Duration::from_secs(POLL_INTERVAL_SECS));
         }
@@ -97,6 +98,12 @@ impl<const POLL_INTERVAL_SECS: u64> Watcher<{ POLL_INTERVAL_SECS }> {
 
 fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> TuxDriveResult<()> {
     tree.dfs_mut(|path, dfs_info| {
+        log::debug!(
+            "Path: {}, Is-Dir: {}, Existing children: {}",
+            path.display(),
+            dfs_info.is_dir,
+            dfs_info.children_paths.len(),
+        );
         if !path.exists() {
             sender
                 .send(WatchEvent::new(path, WatchEventKind::Delete))
@@ -113,6 +120,11 @@ fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> T
                 return Ok(DfsFuncBehaviour::Delete);
             }
         }
+        log::debug!(
+            "Old time: {:?}, New time: {:?}",
+            old_time_info,
+            dfs_info.info
+        );
         if dfs_info.is_dir {
             // Handle newly created directories/files
             let entries = match path.read_dir() {
@@ -151,16 +163,10 @@ fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> T
             }
 
             // Handle recursion
-            if dfs_info.info.updated_since(&old_time_info) {
-                if new_paths.is_empty() {
-                    Ok(DfsFuncBehaviour::AddAndContinue(new_paths))
-                } else {
-                    Ok(DfsFuncBehaviour::Continue)
-                }
-            } else if new_paths.is_empty() {
-                Ok(DfsFuncBehaviour::AddAndStop(new_paths))
+            if !new_paths.is_empty() {
+                Ok(DfsFuncBehaviour::AddAndContinue(new_paths))
             } else {
-                Ok(DfsFuncBehaviour::Stop)
+                Ok(DfsFuncBehaviour::Continue)
             }
         } else {
             if dfs_info.info.modified_since(&old_time_info) {

@@ -1,5 +1,6 @@
-use std::thread;
+use std::{io::Write, thread};
 
+use colored::*;
 use config::Config;
 use error::TuxDriveResult;
 use forest::{info::BasicNodeInfo, DirectoryAddOptions, PathForest};
@@ -27,6 +28,20 @@ compile_error!("Cannot compile TuxDrive on Windows!");
 
 fn main() {
     use std::process::exit;
+
+    env_logger::builder()
+        .format(|buf, rec| {
+            let line = rec
+                .line()
+                .map_or(String::new(), |line| format!(":{}", line));
+            let file = rec
+                .file()
+                .map_or(String::new(), |file| format!(" {}", file));
+            let prelude = format!("[{}{}{}]", rec.level(), file, line);
+            writeln!(buf, "{} {}", prelude.cyan(), rec.args())
+        })
+        .write_style(env_logger::WriteStyle::Always)
+        .init();
 
     if let Err(e) = setup_and_run() {
         eprintln!("Error: {}", e);
