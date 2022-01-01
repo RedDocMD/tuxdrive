@@ -8,7 +8,7 @@ use crossbeam::sync::WaitGroup;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::error::{TuxDriveError, TuxDriveResult};
-use crate::forest::{DfsFuncBehaviour, DirectoryAddOptions, PathForest, PathTree};
+use crate::forest::{DfsFuncBehaviour, DfsMutInfo, DirectoryAddOptions, PathForest, PathTree};
 
 pub struct Watcher<const POLL_INTERVAL_SECS: u64> {
     forest: PathForest<ModTimeInfo>,
@@ -98,34 +98,11 @@ impl<const POLL_INTERVAL_SECS: u64> Watcher<{ POLL_INTERVAL_SECS }> {
 
 fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> TuxDriveResult<()> {
     tree.dfs_mut(|path, dfs_info| {
-        log::debug!(
-            "Path: {}, Is-Dir: {}, Existing children: {}",
-            path.display(),
-            dfs_info.is_dir,
-            dfs_info.children_paths.len(),
-        );
-        if !path.exists() {
-            sender
-                .send(WatchEvent::new(path, WatchEventKind::Delete))
-                .unwrap();
-            return Ok(DfsFuncBehaviour::Delete);
-        }
-        let old_time_info = *dfs_info.info;
-        match dfs_info.info.update_times(path)? {
-            PathAction::Nothing => {}
-            PathAction::Delete => {
-                sender
-                    .send(WatchEvent::new(path, WatchEventKind::Delete))
-                    .unwrap();
-                return Ok(DfsFuncBehaviour::Delete);
-            }
-        }
-        log::debug!(
-            "Old time: {:?}, New time: {:?}",
-            old_time_info,
-            dfs_info.info
-        );
-        if dfs_info.is_dir {
+        fn handle_dir(
+            path: &Path,
+            dfs_info: &DfsMutInfo<ModTimeInfo>,
+            sender: &Sender<WatchEvent>,
+        ) -> TuxDriveResult<DfsFuncBehaviour> {
             // Handle newly created directories/files
             let entries = match path.read_dir() {
                 Ok(v) => v,
@@ -154,6 +131,10 @@ fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> T
                     }
                 };
                 if !dfs_info.children_paths.contains(&entry.path()) {
+                    // Only add files and directories
+                    if !entry.path().is_dir() && !entry.path().is_file() {
+                        continue;
+                    }
                     // Newly found path
                     new_paths.push(entry.path());
                     sender
@@ -168,17 +149,76 @@ fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> T
             } else {
                 Ok(DfsFuncBehaviour::Continue)
             }
-        } else {
-            if dfs_info.info.modified_since(&old_time_info) {
+        }
+
+        fn handle_file(
+            path: &Path,
+            dfs_info: &DfsMutInfo<ModTimeInfo>,
+            sender: &Sender<WatchEvent>,
+            old_time_info: &ModTimeInfo,
+        ) -> TuxDriveResult<DfsFuncBehaviour> {
+            if dfs_info.info.modified_since(old_time_info) {
                 sender
                     .send(WatchEvent::new(path, WatchEventKind::Written))
                     .unwrap();
-            } else if dfs_info.info.modified_since(&old_time_info) {
+            } else if dfs_info.info.changed_since(old_time_info) {
                 sender
                     .send(WatchEvent::new(path, WatchEventKind::Chmod))
                     .unwrap();
             }
             Ok(DfsFuncBehaviour::Stop)
+        }
+
+        log::debug!(
+            "Path: {}, Is-Dir: {}, Existing children: {}",
+            path.display(),
+            dfs_info.is_dir,
+            dfs_info.children_paths.len(),
+        );
+
+        if !path.exists() {
+            sender
+                .send(WatchEvent::new(path, WatchEventKind::Delete))
+                .unwrap();
+            return Ok(DfsFuncBehaviour::Delete);
+        }
+
+        if !path.is_dir() && !path.is_file() {
+            // It is neither a file nor a directory.
+            // So get rid of it.
+            sender
+                .send(WatchEvent::new(path, WatchEventKind::Delete))
+                .unwrap();
+            return Ok(DfsFuncBehaviour::Delete);
+        }
+
+        if path.is_dir() != dfs_info.is_dir {
+            sender
+                .send(WatchEvent::new(path, WatchEventKind::Delete))
+                .unwrap();
+            // We defer the "creation" until the next poll cycle
+            return Ok(DfsFuncBehaviour::Delete);
+        }
+
+        let old_time_info = *dfs_info.info;
+        match dfs_info.info.update_times(path)? {
+            PathAction::Nothing => {}
+            PathAction::Delete => {
+                sender
+                    .send(WatchEvent::new(path, WatchEventKind::Delete))
+                    .unwrap();
+                return Ok(DfsFuncBehaviour::Delete);
+            }
+        }
+        log::debug!(
+            "Old time: {:?}, New time: {:?}",
+            old_time_info,
+            dfs_info.info
+        );
+        if dfs_info.is_dir {
+            handle_dir(path, &dfs_info, sender)
+        } else {
+            handle_file(path, &dfs_info, sender, &old_time_info)
         }
     })?;
     Ok(())
@@ -232,9 +272,16 @@ pub struct WatchEvent {
 
 #[derive(Debug)]
 pub enum WatchEventKind {
+    // Emitted for both directories and files
     Create,
+
+    // If directory is deleted, only emitted for it (not descendants)
     Delete,
+
+    // Emitted only for file
     Written,
+
+    // Emiited only for file
     Chmod,
 }
 

@@ -122,7 +122,12 @@ where
                 }
             };
             let is_dir = match entry.file_type() {
-                Ok(v) => v.is_dir(),
+                Ok(v) => {
+                    if !v.is_dir() && !v.is_file() {
+                        continue;
+                    }
+                    v.is_dir()
+                }
                 Err(err) => {
                     if err.kind() == ErrorKind::NotFound
                         || err.kind() == ErrorKind::PermissionDenied
@@ -170,7 +175,12 @@ where
                 }
             };
             let is_dir = match entry.file_type() {
-                Ok(v) => v.is_dir(),
+                Ok(v) => {
+                    if !v.is_dir() && !v.is_file() {
+                        continue;
+                    }
+                    v.is_dir()
+                }
                 Err(err) => {
                     if err.kind() == ErrorKind::NotFound
                         || err.kind() == ErrorKind::PermissionDenied
