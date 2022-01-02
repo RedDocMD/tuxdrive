@@ -7,6 +7,7 @@ use crossbeam::channel::{Receiver, Sender};
 use crossbeam::sync::WaitGroup;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
+use crate::atomic::AtomicIdGenerator;
 use crate::error::{TuxDriveError, TuxDriveResult};
 use crate::forest::{DfsFuncBehaviour, DfsMutInfo, DirectoryAddOptions, PathForest, PathTree};
 
@@ -14,6 +15,7 @@ pub struct Watcher<const POLL_INTERVAL_SECS: u64> {
     forest: PathForest<ModTimeInfo>,
     sender: Sender<WatchEvent>,
     pool: ThreadPool,
+    id_gen: AtomicIdGenerator,
 }
 
 const MAX_NUM_THREADS: usize = 4;
@@ -27,6 +29,7 @@ impl<const POLL_INTERVAL_SECS: u64> Watcher<{ POLL_INTERVAL_SECS }> {
             forest: PathForest::new(),
             sender: tx,
             pool,
+            id_gen: AtomicIdGenerator::new(),
         };
         Ok((watcher, rx))
     }
@@ -74,7 +77,13 @@ impl<const POLL_INTERVAL_SECS: u64> Watcher<{ POLL_INTERVAL_SECS }> {
         for tree in self.forest.trees_mut() {
             let wg = wg.clone();
             self.pool.install(|| {
-                let res = poll_tree(&self.sender, tree);
+                let res = poll_tree(
+                    tree,
+                    SendInfo {
+                        sender: &self.sender,
+                        id_gen: &self.id_gen,
+                    },
+                );
                 drop(wg);
                 res
             })?;
@@ -96,79 +105,21 @@ impl<const POLL_INTERVAL_SECS: u64> Watcher<{ POLL_INTERVAL_SECS }> {
     }
 }
 
-fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> TuxDriveResult<()> {
+struct SendInfo<'a> {
+    sender: &'a Sender<WatchEvent>,
+    id_gen: &'a AtomicIdGenerator,
+}
+
+impl SendInfo<'_> {
+    fn send_event<P: AsRef<Path>>(&self, path: P, kind: WatchEventKind) {
+        self.sender
+            .send(WatchEvent::new(path, kind, self.id_gen.next_id()))
+            .unwrap();
+    }
+}
+
+fn poll_tree(tree: &mut PathTree<ModTimeInfo>, send_info: SendInfo<'_>) -> TuxDriveResult<()> {
     tree.dfs_mut(|path, dfs_info| {
-        fn handle_dir(
-            path: &Path,
-            dfs_info: &DfsMutInfo<ModTimeInfo>,
-            sender: &Sender<WatchEvent>,
-        ) -> TuxDriveResult<DfsFuncBehaviour> {
-            // Handle newly created directories/files
-            let entries = match path.read_dir() {
-                Ok(v) => v,
-                Err(err) => {
-                    if err.kind() == ErrorKind::NotFound
-                        || err.kind() == ErrorKind::PermissionDenied
-                    {
-                        return Ok(DfsFuncBehaviour::Delete);
-                    } else {
-                        return Err(err.into());
-                    }
-                }
-            };
-            let mut new_paths = Vec::new();
-            for entry in entries {
-                let entry = match entry {
-                    Ok(v) => v,
-                    Err(err) => {
-                        if err.kind() == ErrorKind::NotFound
-                            || err.kind() == ErrorKind::PermissionDenied
-                        {
-                            continue;
-                        } else {
-                            return Err(err.into());
-                        }
-                    }
-                };
-                if !dfs_info.children_paths.contains(&entry.path()) {
-                    // Only add files and directories
-                    if !entry.path().is_dir() && !entry.path().is_file() {
-                        continue;
-                    }
-                    // Newly found path
-                    new_paths.push(entry.path());
-                    sender
-                        .send(WatchEvent::new(entry.path(), WatchEventKind::Create))
-                        .unwrap();
-                }
-            }
-
-            // Handle recursion
-            if !new_paths.is_empty() {
-                Ok(DfsFuncBehaviour::AddAndContinue(new_paths))
-            } else {
-                Ok(DfsFuncBehaviour::Continue)
-            }
-        }
-
-        fn handle_file(
-            path: &Path,
-            dfs_info: &DfsMutInfo<ModTimeInfo>,
-            sender: &Sender<WatchEvent>,
-            old_time_info: &ModTimeInfo,
-        ) -> TuxDriveResult<DfsFuncBehaviour> {
-            if dfs_info.info.modified_since(old_time_info) {
-                sender
-                    .send(WatchEvent::new(path, WatchEventKind::Written))
-                    .unwrap();
-            } else if dfs_info.info.changed_since(old_time_info) {
-                sender
-                    .send(WatchEvent::new(path, WatchEventKind::Chmod))
-                    .unwrap();
-            }
-            Ok(DfsFuncBehaviour::Stop)
-        }
-
         log::debug!(
             "Path: {}, Is-Dir: {}, Existing children: {}",
             path.display(),
@@ -177,25 +128,19 @@ fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> T
         );
 
         if !path.exists() {
-            sender
-                .send(WatchEvent::new(path, WatchEventKind::Delete))
-                .unwrap();
+            send_info.send_event(path, WatchEventKind::Delete);
             return Ok(DfsFuncBehaviour::Delete);
         }
 
         if !path.is_dir() && !path.is_file() {
             // It is neither a file nor a directory.
             // So get rid of it.
-            sender
-                .send(WatchEvent::new(path, WatchEventKind::Delete))
-                .unwrap();
+            send_info.send_event(path, WatchEventKind::Delete);
             return Ok(DfsFuncBehaviour::Delete);
         }
 
         if path.is_dir() != dfs_info.is_dir {
-            sender
-                .send(WatchEvent::new(path, WatchEventKind::Delete))
-                .unwrap();
+            send_info.send_event(path, WatchEventKind::Delete);
             // We defer the "creation" until the next poll cycle
             return Ok(DfsFuncBehaviour::Delete);
         }
@@ -204,9 +149,7 @@ fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> T
         match dfs_info.info.update_times(path)? {
             PathAction::Nothing => {}
             PathAction::Delete => {
-                sender
-                    .send(WatchEvent::new(path, WatchEventKind::Delete))
-                    .unwrap();
+                send_info.send_event(path, WatchEventKind::Delete);
                 return Ok(DfsFuncBehaviour::Delete);
             }
         }
@@ -215,13 +158,75 @@ fn poll_tree(sender: &Sender<WatchEvent>, tree: &mut PathTree<ModTimeInfo>) -> T
             old_time_info,
             dfs_info.info
         );
+
         if dfs_info.is_dir {
-            handle_dir(path, &dfs_info, sender)
+            handle_dir(path, &dfs_info, &send_info)
         } else {
-            handle_file(path, &dfs_info, sender, &old_time_info)
+            handle_file(path, &dfs_info, &old_time_info, &send_info)
         }
     })?;
     Ok(())
+}
+
+fn handle_file(
+    path: &Path,
+    dfs_info: &DfsMutInfo<ModTimeInfo>,
+    old_time_info: &ModTimeInfo,
+    send_info: &SendInfo<'_>,
+) -> TuxDriveResult<DfsFuncBehaviour> {
+    if dfs_info.info.modified_since(old_time_info) {
+        send_info.send_event(path, WatchEventKind::Written);
+    } else if dfs_info.info.changed_since(old_time_info) {
+        send_info.send_event(path, WatchEventKind::Chmod);
+    }
+    Ok(DfsFuncBehaviour::Stop)
+}
+
+fn handle_dir(
+    path: &Path,
+    dfs_info: &DfsMutInfo<ModTimeInfo>,
+    send_info: &SendInfo<'_>,
+) -> TuxDriveResult<DfsFuncBehaviour> {
+    // Handle newly created directories/files
+    let entries = match path.read_dir() {
+        Ok(v) => v,
+        Err(err) => {
+            if err.kind() == ErrorKind::NotFound || err.kind() == ErrorKind::PermissionDenied {
+                return Ok(DfsFuncBehaviour::Delete);
+            } else {
+                return Err(err.into());
+            }
+        }
+    };
+    let mut new_paths = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(v) => v,
+            Err(err) => {
+                if err.kind() == ErrorKind::NotFound || err.kind() == ErrorKind::PermissionDenied {
+                    continue;
+                } else {
+                    return Err(err.into());
+                }
+            }
+        };
+        if !dfs_info.children_paths.contains(&entry.path()) {
+            // Only add files and directories
+            if !entry.path().is_dir() && !entry.path().is_file() {
+                continue;
+            }
+            // Newly found path
+            new_paths.push(entry.path());
+            send_info.send_event(entry.path(), WatchEventKind::Create);
+        }
+    }
+
+    // Handle recursion
+    if !new_paths.is_empty() {
+        Ok(DfsFuncBehaviour::AddAndContinue(new_paths))
+    } else {
+        Ok(DfsFuncBehaviour::Continue)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -268,6 +273,7 @@ impl ModTimeInfo {
 pub struct WatchEvent {
     pub path: PathBuf,
     pub kind: WatchEventKind,
+    pub id: u32,
 }
 
 #[derive(Debug)]
@@ -286,10 +292,11 @@ pub enum WatchEventKind {
 }
 
 impl WatchEvent {
-    fn new<P: AsRef<Path>>(path: P, kind: WatchEventKind) -> Self {
+    fn new<P: AsRef<Path>>(path: P, kind: WatchEventKind, id: u32) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),
             kind,
+            id,
         }
     }
 }

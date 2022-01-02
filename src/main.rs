@@ -18,6 +18,7 @@ macro_rules! path {
     };
 }
 
+mod atomic;
 mod config;
 mod error;
 mod forest;
