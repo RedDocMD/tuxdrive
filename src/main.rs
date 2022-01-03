@@ -7,6 +7,8 @@ use forest::{info::BasicNodeInfo, DirectoryAddOptions, PathForest};
 
 use crate::watcher::Watcher;
 
+use self::reader::FileReader;
+
 #[macro_export]
 macro_rules! path {
     ($($comp:expr), *) => {
@@ -22,6 +24,7 @@ mod atomic;
 mod config;
 mod error;
 mod forest;
+mod reader;
 mod watcher;
 
 #[cfg(not(unix))]
@@ -63,6 +66,8 @@ fn setup_and_run() -> TuxDriveResult<()> {
 
     // Start the watcher
     thread::spawn(move || watcher.start_polling());
+
+    let file_reader = FileReader::new()?;
 
     while let Ok(event) = event_recv.recv() {
         println!("{:?}", event);
