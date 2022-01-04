@@ -186,6 +186,19 @@ impl FileReader {
         };
         Ok((ob, command_send, data_recv))
     }
+
+    pub fn start_event_loop(&self) -> TuxDriveResult<()> {
+        for _i in 0..self.pool.current_num_threads() {
+            self.pool.install(|| -> TuxDriveResult<()> {
+                loop {
+                    let comm = self.command_recv.recv().unwrap();
+                    let data = comm.process()?;
+                    self.data_send.send(data).unwrap();
+                }
+            })?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
