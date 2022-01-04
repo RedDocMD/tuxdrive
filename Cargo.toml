@@ -18,3 +18,8 @@ env_logger = "0.9"
 log = "0.4"
 colored = "2"
 
+[features]
+
+[dev-dependencies]
+derive_builder = "0.10.2"
+
