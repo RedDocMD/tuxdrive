@@ -74,9 +74,15 @@ fn read_deletable_file<P: AsRef<Path>>(path: P) -> TuxDriveResult<Option<Vec<u8>
         }
     };
 
+    let size = if let Some(stat) = stat_deletable_file(&path)? {
+        stat.st_size
+    } else {
+        return Ok(None);
+    };
+
     const BUF_SIZE: usize = 1024;
     let mut buf = [0u8; BUF_SIZE];
-    let mut data: Vec<u8> = Vec::new();
+    let mut data: Vec<u8> = Vec::with_capacity(size as usize);
     loop {
         let bytes_read = match unistd::read(fd, &mut buf) {
             Ok(bt) => bt,
