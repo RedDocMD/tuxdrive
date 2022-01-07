@@ -1,37 +1,14 @@
 use std::{io::Write, thread};
 
 use colored::*;
-use config::Config;
-use error::TuxDriveResult;
-use forest::{info::BasicNodeInfo, DirectoryAddOptions, PathForest};
 
-use crate::{
-    reader::{ReadCommand, ReadCommandKind},
+use tuxdrive::{
+    config::Config,
+    error::TuxDriveResult,
+    forest::{info::BasicNodeInfo, DirectoryAddOptions, PathForest},
+    reader::{FileReader, ReadCommand, ReadCommandKind},
     watcher::{WatchEventKind, Watcher},
 };
-
-use self::reader::FileReader;
-
-#[macro_export]
-macro_rules! path {
-    ($($comp:expr), *) => {
-        {
-            let mut new_path = std::path::PathBuf::new();
-            $(new_path.push(&$comp);)*
-            new_path
-        }
-    };
-}
-
-mod atomic;
-mod config;
-mod error;
-mod forest;
-mod reader;
-mod watcher;
-
-#[cfg(not(unix))]
-compile_error!("Cannot compile TuxDrive on Windows!");
 
 fn main() {
     use std::process::exit;
