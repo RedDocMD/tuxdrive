@@ -17,6 +17,16 @@ pub struct ReadCommand {
     event_id: u32,
 }
 
+impl ReadCommand {
+    pub fn new<P: AsRef<Path>>(path: P, kind: ReadCommandKind, event_id: u32) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+            kind,
+            event_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ReadCommandKind {
     Data,
@@ -187,7 +197,7 @@ impl FileReader {
         Ok((ob, command_send, data_recv))
     }
 
-    pub fn start_event_loop(&self) -> TuxDriveResult<()> {
+    pub fn start_reader(&self) -> TuxDriveResult<()> {
         for _i in 0..self.pool.current_num_threads() {
             self.pool.install(|| -> TuxDriveResult<()> {
                 loop {

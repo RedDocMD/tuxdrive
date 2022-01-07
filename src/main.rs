@@ -5,7 +5,10 @@ use config::Config;
 use error::TuxDriveResult;
 use forest::{info::BasicNodeInfo, DirectoryAddOptions, PathForest};
 
-use crate::watcher::Watcher;
+use crate::{
+    reader::{ReadCommand, ReadCommandKind},
+    watcher::{WatchEventKind, Watcher},
+};
 
 use self::reader::FileReader;
 
@@ -67,14 +70,27 @@ fn setup_and_run() -> TuxDriveResult<()> {
     // Start the watcher
     thread::spawn(move || watcher.start_polling());
 
-    let file_reader = FileReader::new()?;
+    let (file_reader, read_comm_sender, read_data_recv) = FileReader::new()?;
+
+    // Start the file reader
+    thread::spawn(move || file_reader.start_reader());
 
     while let Ok(event) = event_recv.recv() {
         println!("{:?}", event);
+        match event.kind {
+            WatchEventKind::Create => todo!(),
+            WatchEventKind::Delete => todo!(),
+            WatchEventKind::Written => {
+                let read_comm = ReadCommand::new(&event.path, ReadCommandKind::Data, event.id);
+                read_comm_sender.send(read_comm).unwrap();
+            }
+            WatchEventKind::Chmod => {
+                let read_comm =
+                    ReadCommand::new(&event.path, ReadCommandKind::Permission, event.id);
+                read_comm_sender.send(read_comm).unwrap();
+            }
+        }
     }
-
-    // So now we have our path_forest ready with all the paths, and our watcher has the files added
-    // Therefore, path_forest can now go behind a RwLock.
 
     Ok(())
 }
