@@ -1,8 +1,9 @@
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crossbeam::channel::{Receiver, Sender};
-use nix::sys::stat::FileStat;
+use nix::fcntl::{self, OFlag};
+use nix::sys::stat::{FileStat, Mode};
+use nix::unistd;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 #[cfg(test)]
@@ -60,16 +61,41 @@ impl ReadCommand {
 }
 
 fn read_deletable_file<P: AsRef<Path>>(path: P) -> TuxDriveResult<Option<Vec<u8>>> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
+    use nix::errno::Errno;
+
+    let fd = match fcntl::open(path.as_ref(), OFlag::O_RDONLY, Mode::empty()) {
+        Ok(fd) => fd,
         Err(err) => {
-            if err.kind() == ErrorKind::NotFound || err.kind() == ErrorKind::PermissionDenied {
-                Ok(None)
+            if err == Errno::ENOENT || err == Errno::EACCES || err == Errno::EISDIR {
+                return Ok(None);
             } else {
-                Err(err.into())
+                return Err(err.into());
             }
         }
+    };
+
+    const BUF_SIZE: usize = 1024;
+    let mut buf = [0u8; BUF_SIZE];
+    let mut data: Vec<u8> = Vec::new();
+    loop {
+        let bytes_read = match unistd::read(fd, &mut buf) {
+            Ok(bt) => bt,
+            Err(err) => {
+                if err == Errno::ENOENT || err == Errno::EACCES || err == Errno::EISDIR {
+                    return Ok(None);
+                } else {
+                    return Err(err.into());
+                }
+            }
+        };
+        data.extend(&buf[..bytes_read]);
+        if bytes_read < BUF_SIZE {
+            break;
+        }
     }
+
+    unistd::close(fd)?;
+    Ok(Some(data))
 }
 
 fn stat_deletable_file<P: AsRef<Path>>(path: P) -> TuxDriveResult<Option<FileStat>> {
