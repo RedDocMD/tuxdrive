@@ -2,6 +2,7 @@ require "option_parser"
 require "process"
 require "file_utils"
 require "path"
+require "dir"
 
 build = false
 shell = false
@@ -36,12 +37,16 @@ elsif shell
   comm = "docker"
   volume_codedir = "/code"
   volume_cargodir = "/cargodir"
+  volume_targetdir = "/target"
 
   pwd = FileUtils.pwd
   cargo_dir = "#{Path.home}/.cargo"
+  target = "docker-target"
+  Dir.mkdir target unless Dir.exists? target
   args = ["run", "--rm", "-it",
           "-v", "#{pwd}:#{volume_codedir}",
           "-v", "#{cargo_dir}:#{volume_cargodir}",
+          "-v", "#{target}:#{volume_targetdir}",
           image_name]
   Process.run comm, args, input: STDIN, output: STDOUT, error: STDERR
 end
