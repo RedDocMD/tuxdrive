@@ -8,7 +8,7 @@ fn main() {
     file_watcher.add_directory(&args[1], true).unwrap();
     thread::spawn(move || file_watcher.start_polling());
     while let Ok(ev) = event_recv.recv() {
-        println!("{}, {}", ev.path.display(), event_kind_to_string(ev.kind));
+        println!("{},{}", ev.path.display(), event_kind_to_string(ev.kind));
     }
 }
 

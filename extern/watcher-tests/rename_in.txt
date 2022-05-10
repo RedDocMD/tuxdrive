@@ -1,0 +1,13 @@
+WatchDir dir
+Create Dir dir/from
+Wait 2
+Create File dir/from/file1
+Write dir/from/file1 "Hello1"
+Create File dir/from/file2
+Create Dir dir/from/sub
+Create File dir/from/sub/file3
+Write dir/from/file2 "Hello2"
+Write dir/from/sub/file3 "Hello3"
+Wait 3
+Move dir/from dir/to
+Wait 3
